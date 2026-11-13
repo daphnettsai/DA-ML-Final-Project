@@ -168,3 +168,16 @@ def test_yelp_id_mapped_to_another_restaurant_is_rejected(conn, nyc_csv):
     assert ds.load_mappings(conn).set_index("nyc_id")["yelp_id"].to_dict() == {"1001": "yelp-fake-1"}
     ds.add_mapping(conn, "1001", "yelp-fake-2", method="m2", source="synthetic")  # same nyc_id: update
     assert ds.load_mappings(conn).iloc[0].yelp_id == "yelp-fake-2"
+
+
+def test_seed_round_trip_only_into_empty_db(conn, nyc_csv, tmp_path):
+    ds.import_directory_csv(conn, nyc_csv, source="synthetic")
+    ds.add_mapping(conn, "1001", "yelp-fake-1", method="m", source="synthetic")
+    ds.add_to_sample(conn, ["yelp-fake-1"], search_area="Test")
+    for table in ds.PERMANENT_TABLES:
+        ds.export_table_csv(conn, table, tmp_path / "seed" / f"{table}.csv")
+    fresh = ds.connect(":memory:")
+    loaded = ds.import_seed(fresh, tmp_path / "seed")
+    assert loaded["directory"] == 3 and loaded["mappings"] == 1 and loaded["yelp_sample"] == 1
+    assert ds.import_seed(fresh, tmp_path / "seed") == {}  # not empty any more
+    assert ds.import_seed(ds.connect(":memory:"), tmp_path / "missing") == {}

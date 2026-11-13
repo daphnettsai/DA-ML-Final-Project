@@ -19,6 +19,8 @@ data/cache/
 restaurant_data/
 *yelp*.csv
 *yelp*.json
+# Seed files hold NYC data and Yelp business IDs only (allowed permanently), never Yelp content.
+!seed/yelp_sample.csv
 
 # Notebooks
 .ipynb_checkpoints/

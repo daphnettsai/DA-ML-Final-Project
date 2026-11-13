@@ -32,4 +32,12 @@ by floating-point error.
 - Whether Yelp permits our academic/app use (owner and date TBD).
 - Whether to replace Yelp with another licensed source.
 - Whether notebooks are committed (outputs stripped) or left out.
-- First commit goes directly to `main`, or via another route.
+
+## Resolved
+
+- Seed files are committed (2026-11-13): NYC directory, 200 Yelp sample IDs from a new
+  `build-sample` run, 125 name+address mappings. IDs only, no Yelp content.
+- First commit (project skeleton) went directly to `main`; every later phase is a PR.
+- Without Yelp data, the price cap control is disabled in the UI with an explanation
+  (same as rating/review filters).
+- Fresh Yelp data (< 24h) is used even when no key is configured; stale data never is.

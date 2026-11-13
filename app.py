@@ -30,7 +30,9 @@ UNAVAILABLE = "unavailable"
 
 @st.cache_resource
 def get_conn():
-    return ds.connect(os.environ.get("DATABASE_PATH", "data/restaurants.sqlite"))
+    conn = ds.connect(os.environ.get("DATABASE_PATH", "data/restaurants.sqlite"))
+    ds.import_seed(conn, os.environ.get("SEED_DIR", "seed"))  # no-op unless the DB is empty
+    return conn
 
 
 @st.cache_resource
