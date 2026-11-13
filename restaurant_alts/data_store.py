@@ -382,3 +382,33 @@ def _clean(value) -> str | None:
 
 def _num(value) -> float | None:
     return None if value is None or pd.isna(value) else float(value)
+
+
+# ---------------------------------------------------------------- candidate pool
+
+POOL_COLUMNS = ["restaurant_id", "name", "address", "zip", "yelp_id", "categories", "lat", "lon",
+                "rating", "review_count", "price_level", "data_fetched_at"]
+
+
+def build_pool(conn: sqlite3.Connection, use_yelp: bool, now: datetime | None = None) -> pd.DataFrame:
+    """Restaurants in the recommender's input format. The NYC name/address is always kept.
+
+    use_yelp=True: only restaurants mapped to a FRESH Yelp record; categories, coordinates,
+    rating, reviews and price come from Yelp (NYC coordinates fill gaps).
+    use_yelp=False: every NYC record; NYC cuisine as categories, Yelp fields missing.
+    """
+    directory = load_directory(conn)
+    if not use_yelp:
+        pool = directory.rename(columns={"nyc_id": "restaurant_id", "cuisine": "categories"})
+        for col in ("yelp_id", "rating", "review_count", "price_level", "data_fetched_at"):
+            pool[col] = None
+        return pool[POOL_COLUMNS]
+
+    fresh = get_fresh_cache(conn, now=now).rename(columns={
+        "name": "yelp_name", "lat": "yelp_lat", "lon": "yelp_lon", "fetched_at": "data_fetched_at"})
+    pool = (directory.merge(load_mappings(conn)[["nyc_id", "yelp_id"]], on="nyc_id")
+                     .merge(fresh, on="yelp_id"))
+    pool["lat"] = pool["yelp_lat"].fillna(pool["lat"]) if len(pool) else pool["lat"]
+    pool["lon"] = pool["yelp_lon"].fillna(pool["lon"]) if len(pool) else pool["lon"]
+    pool = pool.rename(columns={"nyc_id": "restaurant_id"})
+    return pool[POOL_COLUMNS].reset_index(drop=True)

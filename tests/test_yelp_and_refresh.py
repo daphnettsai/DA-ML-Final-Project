@@ -284,3 +284,48 @@ def test_fallback_still_returns_local_results():
     rec = result.recommendations[0]
     assert rec["rating"] is None and rec["review_count"] is None
     assert "price information is unavailable" in rec["explanation"]
+
+
+# ---------------------------------------------------------------- pool and local mapping
+
+def _directory(conn, tmp_path):
+    csv = tmp_path / "d.csv"
+    csv.write_text("nyc_id,name,address,zip,lat,lon,cuisine\n"
+                   "1,Fake a1,1 Fake Street,10001,40.7,-74.0,Italian\n"
+                   "2,Twin,5 Fake St,10001,,,Thai\n"
+                   "3,Twin,5 Fake St,10001,,,Thai\n")
+    ds.import_directory_csv(conn, csv, source="synthetic")
+
+
+def test_map_locally_one_to_one_only(conn, tmp_path):
+    _directory(conn, tmp_path)
+    recs = [yc.parse_business(biz("a1")),                       # "Fake a1", "1 Fake St"
+            {**yc.parse_business(biz("t")), "name": "Twin", "address": "5 Fake St, New York"}]
+    assert rf.map_locally(conn, recs, NOW) == ["a1"]           # duplicates are not auto-mapped
+    assert ds.load_mappings(conn).iloc[0].method == "name_address"
+
+
+def test_build_pool_yelp_and_local(conn, tmp_path):
+    _directory(conn, tmp_path)
+    ds.add_mapping(conn, "1", "y1", method="m", source="synthetic")
+    ds.add_mapping(conn, "2", "y2", method="m", source="synthetic")
+    ds.upsert_cache(conn, [{"yelp_id": "y1", "name": "Yelp Name", "categories": "Italian, Pizza",
+                            "rating": 4.5, "review_count": 10, "price": "$$", "lat": 40.71, "lon": -74.01},
+                           {"yelp_id": "y2", "categories": "Thai"}],
+                    source="mock", fetched_at=NOW)
+    ds.upsert_cache(conn, [{"yelp_id": "y2"}], source="mock", fetched_at=NOW - timedelta(days=2))
+    pool = ds.build_pool(conn, use_yelp=True, now=NOW)
+    assert list(pool["restaurant_id"]) == ["1"]                # y2 expired -> left out
+    row = pool.iloc[0]
+    assert row["name"] == "Fake a1"                            # NYC name kept
+    assert (row["categories"], row["price_level"], row["lat"]) == ("Italian, Pizza", 2, 40.71)
+    local = ds.build_pool(conn, use_yelp=False, now=NOW)
+    assert len(local) == 3 and local["rating"].isna().all()
+    assert local.set_index("restaurant_id").loc["2", "categories"] == "Thai"
+
+
+def test_fresh_cache_usable_without_key(conn):
+    seed_sample(conn)
+    ds.upsert_cache(conn, [{"yelp_id": i} for i in ("a1", "a2", "b1")], source="mock", fetched_at=NOW)
+    report = rf.ensure_fresh(conn, client(lambda p, q: pytest.fail("no call"), key=None), NOW)
+    assert report.yelp_available and not report.attempted
