@@ -412,3 +412,22 @@ def build_pool(conn: sqlite3.Connection, use_yelp: bool, now: datetime | None = 
     pool["lon"] = pool["yelp_lon"].fillna(pool["lon"]) if len(pool) else pool["lon"]
     pool = pool.rename(columns={"nyc_id": "restaurant_id"})
     return pool[POOL_COLUMNS].reset_index(drop=True)
+
+
+# ---------------------------------------------------------------- seed files (deployment)
+
+def import_seed(conn: sqlite3.Connection, folder: str | Path = "seed") -> dict[str, int]:
+    """Load permanent tables from <folder>/<table>.csv when the directory is empty.
+
+    Streamlit Cloud has no reliable disk, so a fresh deploy starts from these files.
+    Seed files hold NYC data and Yelp business IDs only, never Yelp content.
+    """
+    folder = Path(folder)
+    if not load_directory(conn).empty or not (folder / "directory.csv").exists():
+        return {}
+    loaded = {}
+    for table in PERMANENT_TABLES:  # directory first (foreign keys)
+        path = folder / f"{table}.csv"
+        if path.exists():
+            loaded[table] = import_table_csv(conn, table, path)
+    return loaded
