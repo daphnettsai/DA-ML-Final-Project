@@ -105,6 +105,11 @@ Cosine similarity (0–1) is the only gate: candidates need ≥ 0.30.
 
 *Score reflects category overlap only, not menu, atmosphere, or quality.*
 
+**Candidates:** with Yelp data, every sampled restaurant with fresh Yelp data, whether or
+not it matches an NYC record (unmatched ones show Yelp's name and address, which expire
+with the other Yelp fields). The reference itself, or a Yelp listing of it (same Yelp ID,
+or same name in the same ZIP), is never returned. Without Yelp data, NYC records only.
+
 **Retrieval** (`restaurant_alts/recommender.py`):
 - Stage 1 (local): exclude the reference, apply required-cuisine and max-distance
   filters, keep similarity ≥ 0.30, take the top 30.
@@ -144,7 +149,7 @@ SQLite for development (`DATABASE_PATH`, default `data/restaurants.sqlite`, giti
 | `aliases` | alias → NYC id, source | Permanent |
 | `yelp_sample` | fixed Yelp business IDs, search area | Permanent (IDs only) |
 | `yelp_calls` | Yelp calls per UTC day | Permanent (counts only) |
-| `yelp_cache` | Yelp name, rating, reviews, price, categories, coordinates, fetched_at | **24 hours** |
+| `yelp_cache` | Yelp name, address, ZIP, rating, reviews, price, categories, coordinates, fetched_at | **24 hours** |
 
 CSV import/export works for the permanent tables only; the Yelp cache can never be
 exported. `python scripts/manage.py export-seed` writes `seed/*.csv`, and the app loads
@@ -181,10 +186,11 @@ Never commit: `.env`, `.streamlit/secrets.toml`, `.venv/`, `__pycache__/`,
 
 - Similarity reflects category overlap only — not menu, atmosphere, quality, or how easy it
   is to get a table. Fewer reviews is a rough visibility signal, nothing more.
-- Results are limited to the fixed Yelp sample (~200 restaurants across 10 areas) when Yelp
-  is available. Search-area names are not verified neighbourhood boundaries.
-- Sampled Yelp businesses that can't be matched one-to-one to an NYC record (by name and
-  address) are left out: currently 125 of 200 are matched.
+- Alternatives come from the fixed Yelp sample (200 restaurants across 10 areas) when Yelp
+  is available; you can search for any of the 12,532 NYC restaurants as the reference. Search-area names are not verified neighbourhood boundaries.
+- 125 of the 200 sampled Yelp restaurants match an NYC record. The other 75 are still
+  candidates while their Yelp data is fresh (shown with Yelp's name and address), but drop
+  out in local-only mode.
 - The NYC file has no coordinates, so distance is only known from Yelp data; in
   local-only mode the distance filter and tier can't be used.
 - In local-only mode, NYC cuisine is usually a single label, so similarity is mostly 1.0
