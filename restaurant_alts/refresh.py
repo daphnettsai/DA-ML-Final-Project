@@ -24,6 +24,7 @@ from typing import Iterable
 import pandas as pd
 
 from restaurant_alts import data_store as ds
+from restaurant_alts.name_matching import normalize_address, normalize_name
 from restaurant_alts.yelp_client import YelpClient, YelpUnavailable
 
 SEARCH_AREAS = (
@@ -88,6 +89,7 @@ def refresh_sample(conn: sqlite3.Connection, client: YelpClient,
         report.reason = str(error) or error.reason
 
     ds.upsert_cache(conn, found.values(), source=SOURCE_SEARCH, fetched_at=now)
+    map_locally(conn, found.values(), now)
     report.calls = client.counter.session_calls - calls_before
     report.refreshed = sorted(found)
     report.not_refreshed = sorted(sample_ids - found.keys())
@@ -98,11 +100,11 @@ def ensure_fresh(conn: sqlite3.Connection, client: YelpClient,
                  now: datetime | None = None) -> RefreshReport:
     """Call on the button click only. Refreshes the sample if its cache is stale."""
     now = now or ds.utc_now()
+    if not ds.cache_is_stale(conn, now=now):  # fresh data needs no call (and no key)
+        return RefreshReport(purged=ds.purge_expired(conn, now))
     if not client.available:
         reason = "Yelp access is disabled." if client.disabled else "No Yelp API key is configured."
         return RefreshReport(yelp_available=False, reason=reason, purged=ds.purge_expired(conn, now))
-    if not ds.cache_is_stale(conn, now=now):
-        return RefreshReport(purged=ds.purge_expired(conn, now))
     return refresh_sample(conn, client, now)
 
 
@@ -165,6 +167,39 @@ def resolve_mappings(conn: sqlite3.Connection, client: YelpClient,
     return mapped, skipped, reason
 
 
+def map_locally(conn: sqlite3.Connection, records: Iterable[dict],
+                now: datetime | None = None) -> list[str]:
+    """Map Yelp search results to NYC records by normalized name + address (no API calls).
+
+    Only a one-to-one match is accepted (the notebook's rule); Yelp IDs already mapped are
+    left alone. The Yelp address is used here only and never stored. Returns mapped IDs.
+    """
+    directory = ds.load_directory(conn)
+    if directory.empty:
+        return []
+    keys = pd.Series(list(zip(directory["name"].map(normalize_name),
+                              directory["address"].map(normalize_address))), index=directory.index)
+    counts = keys.value_counts()
+    already = set(ds.load_mappings(conn)["yelp_id"])
+    mapped_nyc = set(ds.load_mappings(conn)["nyc_id"])
+    done = []
+    for rec in records:
+        key = (normalize_name(rec.get("name")), normalize_address(rec.get("address")))
+        if rec.get("yelp_id") in already or not all(key) or counts.get(key, 0) != 1:
+            continue
+        nyc_id = directory.loc[[k == key for k in keys], "nyc_id"].iloc[0]
+        if nyc_id in mapped_nyc:
+            continue
+        try:
+            ds.add_mapping(conn, nyc_id, rec["yelp_id"], method="name_address",
+                           source=SOURCE_SEARCH, matched_at=now)
+        except sqlite3.IntegrityError:
+            continue
+        mapped_nyc.add(nyc_id)
+        done.append(rec["yelp_id"])
+    return done
+
+
 # ---------------------------------------------------------------- one-time sample build
 
 def build_sample(conn: sqlite3.Connection, client: YelpClient, per_area: int = 20,
@@ -196,6 +231,7 @@ def build_sample(conn: sqlite3.Connection, client: YelpClient, per_area: int = 2
         report.yelp_available = False
         report.reason = str(error) or error.reason
     ds.upsert_cache(conn, taken.values(), source=SOURCE_SEARCH, fetched_at=now)
+    map_locally(conn, taken.values(), now)
     report.calls = client.counter.session_calls - calls_before
     report.refreshed = sorted(taken)
     return report

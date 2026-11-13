@@ -116,10 +116,14 @@ def load_api_key() -> str | None:
     key = os.environ.get("YELP_API_KEY", "").strip()
     if key:
         return key
+    from pathlib import Path
+    secret_files = (Path(".streamlit/secrets.toml"), Path.home() / ".streamlit/secrets.toml")
+    if not any(p.exists() for p in secret_files):
+        return None  # touching st.secrets without a file prints an error in the app
     try:
         import streamlit as st
         return str(st.secrets.get("YELP_API_KEY", "")).strip() or None
-    except Exception:  # streamlit missing, or no secrets file
+    except Exception:  # streamlit missing, or unreadable secrets
         return None
 
 
