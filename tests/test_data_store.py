@@ -157,3 +157,14 @@ def test_file_database_is_created(tmp_path):
     path = tmp_path / "sub" / "db.sqlite"
     ds.connect(path).close()
     assert path.exists()
+
+
+def test_yelp_id_mapped_to_another_restaurant_is_rejected(conn, nyc_csv):
+    import sqlite3
+    ds.import_directory_csv(conn, nyc_csv, source="synthetic")
+    ds.add_mapping(conn, "1001", "yelp-fake-1", method="m", source="synthetic")
+    with pytest.raises(sqlite3.IntegrityError):
+        ds.add_mapping(conn, "1002", "yelp-fake-1", method="m", source="synthetic")
+    assert ds.load_mappings(conn).set_index("nyc_id")["yelp_id"].to_dict() == {"1001": "yelp-fake-1"}
+    ds.add_mapping(conn, "1001", "yelp-fake-2", method="m2", source="synthetic")  # same nyc_id: update
+    assert ds.load_mappings(conn).iloc[0].yelp_id == "yelp-fake-2"
