@@ -164,10 +164,17 @@ def add_mapping(
     source: str,
     matched_at: datetime | None = None,
 ) -> None:
+    """Map one NYC record to one Yelp ID.
+
+    Re-mapping the same nyc_id updates it. A yelp_id already mapped to a DIFFERENT
+    restaurant raises sqlite3.IntegrityError (never silently moves the mapping).
+    """
     with conn:
         conn.execute(
-            "INSERT OR REPLACE INTO mappings (nyc_id, yelp_id, matched_at, method, source)"
-            " VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO mappings (nyc_id, yelp_id, matched_at, method, source)"
+            " VALUES (?, ?, ?, ?, ?)"
+            " ON CONFLICT(nyc_id) DO UPDATE SET yelp_id = excluded.yelp_id,"
+            " matched_at = excluded.matched_at, method = excluded.method, source = excluded.source",
             (nyc_id, yelp_id, to_iso(matched_at or utc_now()), method, source),
         )
 
