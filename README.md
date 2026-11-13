@@ -167,9 +167,11 @@ Planned manual evaluation: 20–30 real reference restaurants, compared with a b
 - Deploy from `main`. `main` redeploys automatically, so merge only through reviewed PRs.
 - Add `YELP_API_KEY` (and optionally `YELP_DAILY_CALL_LIMIT`) under the app's
   **Settings → Secrets**; see `.streamlit/secrets.toml.example`.
-- Streamlit Cloud has no reliable disk: the database starts empty after each restart and
-  the Yelp cache is rebuilt on the next click. The NYC directory, mappings and sample IDs
-  must come from `seed/` (see "Open decisions").
+- Streamlit Cloud has no reliable disk: the database starts empty after each restart, is
+  loaded from the committed `seed/` files (12,532 NYC restaurants, 200 sampled Yelp IDs,
+  125 mappings), and the Yelp cache is rebuilt on the next click.
+- To change the sample: delete `data/restaurants.sqlite`, import the directory, run
+  `build-sample`, then `python scripts/manage.py export-seed` and commit `seed/` via a PR.
 - If a key is ever committed, **rotate it immediately** in the Yelp developer portal.
 
 Never commit: `.env`, `.streamlit/secrets.toml`, `.venv/`, `__pycache__/`,
@@ -182,7 +184,9 @@ Never commit: `.env`, `.streamlit/secrets.toml`, `.venv/`, `__pycache__/`,
 - Results are limited to the fixed Yelp sample (~200 restaurants across 10 areas) when Yelp
   is available. Search-area names are not verified neighbourhood boundaries.
 - Sampled Yelp businesses that can't be matched one-to-one to an NYC record (by name and
-  address) are left out.
+  address) are left out: currently 125 of 200 are matched.
+- The NYC file has no coordinates, so distance is only known from Yelp data; in
+  local-only mode the distance filter and tier can't be used.
 - In local-only mode, NYC cuisine is usually a single label, so similarity is mostly 1.0
   or 0.0 and the ranking relies more on distance.
 - The fuzzy-match cutoff (70) and default filters are starting assumptions to be tested
@@ -192,9 +196,6 @@ Never commit: `.env`, `.streamlit/secrets.toml`, `.venv/`, `__pycache__/`,
 
 - **Yelp terms:** whether Yelp permits our academic/app use (owner and date TBD).
 - **Replacing Yelp** with another licensed source for ratings and review counts.
-- **Seed files for deployment:** whether to commit `seed/*.csv` (public NYC data plus Yelp
-  business IDs, no Yelp content). `seed/yelp_sample.csv` is currently blocked by the
-  `*yelp*.csv` rule in `.gitignore` and would need an explicit exception.
 - **Notebooks:** whether the original data-collection and recommendation notebooks are
   committed with outputs stripped, or left out. They are not in the repo yet.
 

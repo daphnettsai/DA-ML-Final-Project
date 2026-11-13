@@ -32,10 +32,11 @@ by floating-point error.
 - Whether Yelp permits our academic/app use (owner and date TBD).
 - Whether to replace Yelp with another licensed source.
 - Whether notebooks are committed (outputs stripped) or left out.
-- Whether to commit `seed/*.csv` (NYC data + Yelp IDs) so Streamlit Cloud has data.
 
 ## Resolved
 
+- Seed files are committed (2026-11-13): NYC directory, 200 Yelp sample IDs from a new
+  `build-sample` run, 125 name+address mappings. IDs only, no Yelp content.
 - First commit (project skeleton) went directly to `main`; every later phase is a PR.
 - Without Yelp data, the price cap control is disabled in the UI with an explanation
   (same as rating/review filters).
