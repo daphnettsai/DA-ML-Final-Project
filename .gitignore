@@ -1,0 +1,29 @@
+# Secrets: never commit. If a key is ever committed, rotate it immediately.
+.env
+.streamlit/secrets.toml
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Local data: Yelp content may be cached for at most 24 hours and must never be in Git
+data/*
+!data/.gitkeep
+data/cache/
+*.sqlite
+*.sqlite3
+*.db
+restaurant_data/
+*yelp*.csv
+*yelp*.json
+
+# Notebooks
+.ipynb_checkpoints/
+
+# OS / editors
+.DS_Store
+.vscode/
+.idea/

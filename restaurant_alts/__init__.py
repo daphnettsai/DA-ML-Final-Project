@@ -1,0 +1,1 @@
+"""Manhattan restaurant-alternative recommender."""
