@@ -329,3 +329,51 @@ def test_fresh_cache_usable_without_key(conn):
     ds.upsert_cache(conn, [{"yelp_id": i} for i in ("a1", "a2", "b1")], source="mock", fetched_at=NOW)
     report = rf.ensure_fresh(conn, client(lambda p, q: pytest.fail("no call"), key=None), NOW)
     assert report.yelp_available and not report.attempted
+
+
+# ---------------------------------------------------------------- amendment 2: Yelp-only candidates
+
+def test_pool_includes_unmatched_yelp_listings(conn, tmp_path):
+    _directory(conn, tmp_path)
+    ds.add_mapping(conn, "1", "y1", method="m", source="synthetic")
+    ds.upsert_cache(conn, [
+        {"yelp_id": "y1", "name": "Yelp Spelling", "categories": "Italian", "address": "1 Fake St",
+         "zip": "10001", "lat": 40.71, "lon": -74.0},
+        {"yelp_id": "y9", "name": "Only On Yelp", "categories": "Thai", "address": "9 Fake Ave",
+         "zip": "10009", "lat": 40.72, "lon": -73.99},
+    ], source="mock", fetched_at=NOW)
+    ds.upsert_cache(conn, [{"yelp_id": "old", "name": "Expired", "categories": "Thai"}],
+                    source="mock", fetched_at=NOW - timedelta(days=2))
+    pool = ds.build_pool(conn, use_yelp=True, now=NOW).set_index("restaurant_id")
+    assert set(pool.index) == {"1", "yelp:y9"}                      # expired never included
+    assert pool.loc["1", ["name", "name_source"]].tolist() == ["Fake a1", "nyc"]
+    assert pool.loc["yelp:y9", ["name", "address", "zip", "name_source"]].tolist() == [
+        "Only On Yelp", "9 Fake Ave", "10009", "yelp"]
+    local = ds.build_pool(conn, use_yelp=False, now=NOW)
+    assert not local["restaurant_id"].str.startswith("yelp:").any()  # fallback: NYC only
+
+
+def test_old_database_gets_new_cache_columns(tmp_path):
+    import sqlite3
+    path = tmp_path / "old.sqlite"
+    old = sqlite3.connect(path)
+    old.execute("CREATE TABLE yelp_cache (yelp_id TEXT PRIMARY KEY, name TEXT, rating REAL,"
+                " review_count INTEGER, price TEXT, categories TEXT, lat REAL, lon REAL,"
+                " source TEXT NOT NULL, fetched_at TEXT NOT NULL)")
+    old.commit(); old.close()
+    conn = ds.connect(path)
+    ds.upsert_cache(conn, [{"yelp_id": "a", "address": "1 St", "zip": "10001"}], source="mock")
+    assert ds.get_fresh_cache(conn).iloc[0]["zip"] == "10001"
+
+
+def test_reference_yelp_twin_is_never_returned():
+    pool = pd.DataFrame([
+        ("123", "Same Place", "10001", "y1", "Italian"),
+        ("yelp:y1", "Same Place", "10001", "y1", "Italian"),        # same Yelp ID
+        ("yelp:y2", "Same  Place!", "10001", "y2", "Italian"),      # same name + ZIP
+        ("yelp:y3", "Same Place", "10002", "y3", "Italian"),        # other branch: kept
+        ("yelp:y4", "Other Place", "10001", "y4", "Italian"),
+    ], columns=["restaurant_id", "name", "zip", "yelp_id", "categories"])
+    ref = pool.iloc[0].to_dict()
+    result = recommend(ref, pool, Filters(min_rating=None, min_reviews=None, review_ratio=None))
+    assert sorted(r["restaurant_id"] for r in result.recommendations) == ["yelp:y3", "yelp:y4"]

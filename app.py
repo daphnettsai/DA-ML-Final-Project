@@ -219,7 +219,10 @@ else:
                         f"({rec['similarity_score']:.2f})")
             if rec["restaurant_id"] in pool.index:
                 addr = pool.loc[rec["restaurant_id"], "address"]
-                if addr:
+                if pool.loc[rec["restaurant_id"], "name_source"] == "yelp":
+                    st.caption(f"{addr or 'Address unavailable'} · name and address from Yelp "
+                               "(not matched to an NYC record)")
+                elif addr:
                     st.caption(addr)
             st.write(rec["explanation"])
             c1, c2, c3, c4 = st.columns(4)

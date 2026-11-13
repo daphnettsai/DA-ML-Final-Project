@@ -20,6 +20,23 @@ Decision:
 - Fallback is unchanged: if Yelp is unavailable, rank from local NYC data only and label
   Yelp fields "unavailable".
 
+## Amendment 2: candidates come from Yelp, search stays on NYC (approved 2026-11-13)
+
+Problem: only 125 of the 200 sampled Yelp restaurants match an NYC record one-to-one, so
+requiring a match dropped over a third of the candidates.
+
+Decision:
+- **Reference search** stays local on the NYC directory (works without Yelp, any
+  Manhattan restaurant). The chosen restaurant is matched to Yelp on the click.
+- **Candidates** (Yelp mode) are every fresh Yelp record in the cache, matched or not.
+  Matched ones keep the NYC name/address; unmatched ones use the Yelp name/address, which
+  are Yelp content and expire after 24 hours with the other Yelp fields. Their id is
+  `yelp:<business id>`; the UI labels them "name and address from Yelp".
+- Section 3's "NYC record is the permanent record" now applies to matched restaurants only.
+- The reference is excluded by id, by Yelp ID, and by same normalized name + ZIP, so a
+  Yelp-only listing of the same restaurant is never returned.
+- Local-only fallback is unchanged: NYC records only, so unmatched Yelp listings drop out.
+
 ## Clarification: ranking rule
 
 The tiered ranking (cuisine band, distance band, price gap, rating, distance, name)

@@ -21,6 +21,7 @@ import numpy as np
 import pandas as pd
 
 from restaurant_alts import features as ft
+from restaurant_alts.name_matching import normalize_name
 
 STAGE1_LIMIT = 30
 FINAL_LIMIT = 10
@@ -90,6 +91,20 @@ def effective_max_reviews(reference_reviews, filters: Filters) -> tuple[int | No
 NUMERIC_COLUMNS = ("lat", "lon", "rating", "review_count", "price_level")
 
 
+def not_reference(reference: Mapping, df: pd.DataFrame) -> pd.Series:
+    """Rows that are NOT the reference: different id, different Yelp ID, and not the same
+    normalized name in the same ZIP (catches a Yelp-only listing of the same restaurant)."""
+    keep = df["restaurant_id"].ne(_get(reference, "restaurant_id"))
+    ref_yelp = _get(reference, "yelp_id")
+    if ref_yelp is not None and "yelp_id" in df.columns:
+        keep &= df["yelp_id"].ne(ref_yelp) | df["yelp_id"].isna()
+    ref_name, ref_zip = normalize_name(_get(reference, "name")), _get(reference, "zip")
+    if ref_name and ref_zip is not None and "zip" in df.columns:
+        same = df["name"].map(normalize_name).eq(ref_name) & df["zip"].astype(str).eq(str(ref_zip))
+        keep &= ~same
+    return keep
+
+
 def _coerce(df: pd.DataFrame) -> pd.DataFrame:
     """Numeric columns as floats with NaN for missing (None/pd.NA/'' all become NaN)."""
     df = df.copy()
@@ -114,7 +129,7 @@ def stage1(reference: Mapping, pool: pd.DataFrame, filters: Filters) -> tuple[pd
     filters.validate()
     result = Result()
     ref_id = _get(reference, "restaurant_id")
-    cands = _coerce(pool[pool["restaurant_id"].ne(ref_id)])  # the reference is never returned
+    cands = _coerce(pool[not_reference(reference, pool)])  # the reference is never returned
 
     if not ft.category_tokens(_get(reference, "categories")):
         return cands.iloc[0:0], _empty(
@@ -179,7 +194,7 @@ def stage2(
     if result.empty_reason:
         return result
     ref_id = _get(reference, "restaurant_id")
-    cands = _coerce(candidates[candidates["restaurant_id"].ne(ref_id)])
+    cands = _coerce(candidates[not_reference(reference, candidates)])
     excluded: dict[str, int] = {}
     ref_reviews = _get(reference, "review_count")
 

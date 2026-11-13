@@ -66,10 +66,15 @@ CREATE TABLE IF NOT EXISTS yelp_cache (
     categories   TEXT,
     lat          REAL,
     lon          REAL,
+    address      TEXT,
+    zip          TEXT,
     source       TEXT NOT NULL,
     fetched_at   TEXT NOT NULL
 );
 """
+
+# Columns added after the first release; connect() adds them to older databases.
+_CACHE_MIGRATIONS = {"address": "TEXT", "zip": "TEXT"}
 
 PERMANENT_TABLES = ("directory", "mappings", "aliases", "yelp_sample")
 
@@ -129,6 +134,11 @@ def connect(path: str | Path = "data/restaurants.sqlite") -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
+    have = {r["name"] for r in conn.execute("PRAGMA table_info(yelp_cache)")}
+    for column, kind in _CACHE_MIGRATIONS.items():
+        if column not in have:
+            conn.execute(f"ALTER TABLE yelp_cache ADD COLUMN {column} {kind}")
+    conn.commit()
     return conn
 
 
@@ -210,7 +220,8 @@ def add_to_sample(
 
 # ---------------------------------------------------------------- yelp cache
 
-CACHE_FIELDS = ("name", "rating", "review_count", "price", "categories", "lat", "lon")
+CACHE_FIELDS = ("name", "rating", "review_count", "price", "categories", "lat", "lon",
+                "address", "zip")
 
 
 def upsert_cache(
@@ -235,8 +246,8 @@ def upsert_cache(
     with conn:
         conn.executemany(
             "INSERT OR REPLACE INTO yelp_cache"
-            " (yelp_id, name, rating, review_count, price, categories, lat, lon, source, fetched_at)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            f" (yelp_id, {', '.join(CACHE_FIELDS)}, source, fetched_at)"
+            f" VALUES ({', '.join('?' * (len(CACHE_FIELDS) + 3))})",
             rows,
         )
     return len(rows)
@@ -387,14 +398,19 @@ def _num(value) -> float | None:
 # ---------------------------------------------------------------- candidate pool
 
 POOL_COLUMNS = ["restaurant_id", "name", "address", "zip", "yelp_id", "categories", "lat", "lon",
-                "rating", "review_count", "price_level", "data_fetched_at"]
+                "rating", "review_count", "price_level", "data_fetched_at", "name_source"]
+
+YELP_ONLY_PREFIX = "yelp:"
 
 
 def build_pool(conn: sqlite3.Connection, use_yelp: bool, now: datetime | None = None) -> pd.DataFrame:
-    """Restaurants in the recommender's input format. The NYC name/address is always kept.
+    """Restaurants in the recommender's input format.
 
-    use_yelp=True: only restaurants mapped to a FRESH Yelp record; categories, coordinates,
-    rating, reviews and price come from Yelp (NYC coordinates fill gaps).
+    use_yelp=True (amendment 2): every FRESH Yelp record, matched to NYC or not.
+      - Matched: restaurant_id = NYC id, NYC name/address (the permanent record).
+      - Unmatched: restaurant_id = "yelp:<id>", Yelp name/address (24h, like other Yelp fields).
+      Categories, coordinates, rating, reviews and price come from Yelp (NYC coordinates
+      fill gaps). Expired records are never included.
     use_yelp=False: every NYC record; NYC cuisine as categories, Yelp fields missing.
     """
     directory = load_directory(conn)
@@ -402,15 +418,20 @@ def build_pool(conn: sqlite3.Connection, use_yelp: bool, now: datetime | None = 
         pool = directory.rename(columns={"nyc_id": "restaurant_id", "cuisine": "categories"})
         for col in ("yelp_id", "rating", "review_count", "price_level", "data_fetched_at"):
             pool[col] = None
+        pool["name_source"] = "nyc"
         return pool[POOL_COLUMNS]
 
-    fresh = get_fresh_cache(conn, now=now).rename(columns={
-        "name": "yelp_name", "lat": "yelp_lat", "lon": "yelp_lon", "fetched_at": "data_fetched_at"})
-    pool = (directory.merge(load_mappings(conn)[["nyc_id", "yelp_id"]], on="nyc_id")
-                     .merge(fresh, on="yelp_id"))
-    pool["lat"] = pool["yelp_lat"].fillna(pool["lat"]) if len(pool) else pool["lat"]
-    pool["lon"] = pool["yelp_lon"].fillna(pool["lon"]) if len(pool) else pool["lon"]
-    pool = pool.rename(columns={"nyc_id": "restaurant_id"})
+    fresh = get_fresh_cache(conn, now=now).rename(columns={"fetched_at": "data_fetched_at"})
+    nyc = directory.rename(columns={c: f"nyc_{c}" for c in directory.columns if c != "nyc_id"})
+    pool = (fresh.merge(load_mappings(conn)[["nyc_id", "yelp_id"]], on="yelp_id", how="left")
+                 .merge(nyc, on="nyc_id", how="left"))
+    matched = pool["nyc_id"].notna() & pool["nyc_name"].notna()
+    pool["restaurant_id"] = pool["nyc_id"].where(matched, YELP_ONLY_PREFIX + pool["yelp_id"])
+    for col in ("name", "address", "zip"):
+        pool[col] = pool[f"nyc_{col}"].where(matched, pool[col])
+    for col in ("lat", "lon"):
+        pool[col] = pool[col].astype(float).fillna(pool[f"nyc_{col}"].astype(float))
+    pool["name_source"] = matched.map({True: "nyc", False: "yelp"})
     return pool[POOL_COLUMNS].reset_index(drop=True)
 
 
